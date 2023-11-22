@@ -66,8 +66,8 @@ abstract contract EigenPodManagerStorage is IEigenPodManager {
     mapping(address => int256) public podOwnerShares;
 
 
-    /// @notice succinct's function gateway contract
-    ISuccinctGateway public succinctGateway;
+    mapping(uint8 => ProofServiceDetails) public proofServiceDirectory;
+    
 
     constructor(
         IETHPOSDeposit _ethPOS,
