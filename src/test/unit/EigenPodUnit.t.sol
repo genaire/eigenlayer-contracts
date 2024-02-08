@@ -898,7 +898,7 @@ contract EigenPodUnitTests_WithdrawalTests is EigenPodHarnessSetup, ProofParsing
         assertTrue(eigenPodHarness.provenWithdrawal(validatorPubKeyHash, withdrawalTimestamp), "Withdrawal not set to proven");
 
         // Checks from  _processPartialWithdrawal
-        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedGwei(), withdrawalAmountGwei, "Incorrect partial withdrawal amount");
+        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei(), withdrawalAmountGwei, "Incorrect partial withdrawal amount");
         assertEq(vw.amountToSendGwei, withdrawalAmountGwei, "Amount to send via router is not correct");
         assertEq(vw.sharesDeltaGwei, 0, "Shares delta should be 0");
 
@@ -962,7 +962,7 @@ contract EigenPodUnitTests_WithdrawalTests is EigenPodHarnessSetup, ProofParsing
         IEigenPod.VerifiedWithdrawal memory vw = eigenPodHarness.processPartialWithdrawal(validatorIndex, withdrawalTimestamp, recipient, partialWithdrawalAmountGwei);
 
         // Checks
-        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedGwei(), partialWithdrawalAmountGwei, "Incorrect partial withdrawal amount");
+        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei(), partialWithdrawalAmountGwei, "Incorrect partial withdrawal amount");
         assertEq(vw.amountToSendGwei, partialWithdrawalAmountGwei, "Amount to send via router is not correct");
         assertEq(vw.sharesDeltaGwei, 0, "Shares delta should be 0");
     }
@@ -1024,5 +1024,106 @@ contract EigenPodUnitTests_WithdrawalTests is EigenPodHarnessSetup, ProofParsing
             validatorFields
         );
         _;
+    }
+}
+
+contract EigenPodUnitTests_OffchainPartialWithdrawalProofTests is EigenPodUnitTests, IEigenPodEvents { 
+    address feeRecipient = address(123);
+    uint256 internal constant GWEI_TO_WEI = 1e9;
+
+    function testFuzz_proofCallbackRequest_revert_inconsistentTimestamps(uint64 endTimestamp) external {
+        cheats.assume(eigenPod.mostRecentWithdrawalTimestamp() >= endTimestamp);
+
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch(0, eigenPod.mostRecentWithdrawalTimestamp(), endTimestamp);
+        cheats.startPrank(address(eigenPodManagerMock));
+        cheats.expectRevert("EigenPod.fulfillPartialWithdrawalProofRequest: mostRecentWithdrawalTimestamp must precede endTimestamp");
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, 0, address(this));
+        cheats.stopPrank();
+    }
+
+    function testFuzz_proofCallbackRequest_revert_inconsistentMostRecentWithdrawalTimestamps(uint64 mostRecentWithdrawalTimestamp) external {
+        cheats.assume(mostRecentWithdrawalTimestamp != eigenPod.mostRecentWithdrawalTimestamp());
+
+        // IEigenPodManager.WithdrawalCallbackInfo memory withdrawalCallbackInfo = IEigenPodManager.WithdrawalCallbackInfo(podOwner, address(eigenPod), 0, mostRecentWithdrawalTimestamp, 0, 0, 0);
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch(0, mostRecentWithdrawalTimestamp, 0);
+
+        cheats.startPrank(address(eigenPodManagerMock));
+        cheats.expectRevert("EigenPod.fulfillPartialWithdrawalProofRequest: proven mostRecentWithdrawalTimestamp must match mostRecentWithdrawalTimestamp in the EigenPod");
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, 0, address(this));
+        cheats.stopPrank();
+    }
+
+    function testFuzz_proofCallbackRequest_PartialWithdrawalSumLessThanFee(uint64 endTimestamp, uint64 provenAmount, uint64 fee) external {
+        cheats.assume(provenAmount < fee);
+
+        cheats.assume(eigenPod.mostRecentWithdrawalTimestamp() < endTimestamp);
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch({provenPartialWithdrawalSumGwei: provenAmount, mostRecentWithdrawalTimestamp: eigenPod.mostRecentWithdrawalTimestamp(), endTimestamp: endTimestamp});
+
+        cheats.startPrank(address(eigenPodManagerMock));
+        cheats.expectRevert(bytes("EigenPod.fulfillPartialWithdrawalProofRequest: provenPartialWithdrawalSumGwei must be greater than the fee"));
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, fee, feeRecipient);
+        cheats.stopPrank();
+    }
+
+    function testFuzz_proofCallbackRequest_ProvenAmountIsLessThanMerkleProvenAmount(uint64 endTimestamp, uint64 sumOfPartialWithdrawalsClaimedGwei, uint64 provenAmount, uint64 fee) external {
+        cheats.assume(provenAmount < sumOfPartialWithdrawalsClaimedGwei);
+        cheats.assume(provenAmount > fee);
+
+        cheats.assume(eigenPod.mostRecentWithdrawalTimestamp() < endTimestamp);
+         bytes32 slot = bytes32(uint256(56)); 
+        bytes32 value = bytes32(uint256(sumOfPartialWithdrawalsClaimedGwei)); 
+        cheats.store(address(eigenPod), slot, value);
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch({provenPartialWithdrawalSumGwei: provenAmount, mostRecentWithdrawalTimestamp: eigenPod.mostRecentWithdrawalTimestamp(), endTimestamp: endTimestamp});
+
+        cheats.startPrank(address(eigenPodManagerMock));
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, fee, feeRecipient);
+        cheats.stopPrank();
+
+        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei(), sumOfPartialWithdrawalsClaimedGwei - provenAmount, "Incorrect sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei");
+    }
+
+    function testFuzz_proofCallbackRequest_MerkleProvenPartialWithdrawalsIsZero(uint64 endTimestamp, uint64 provenAmount, uint64 fee) external {
+        cheats.assume(provenAmount > fee);
+
+        cheats.assume(eigenPod.mostRecentWithdrawalTimestamp() < endTimestamp);
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch({provenPartialWithdrawalSumGwei: provenAmount, mostRecentWithdrawalTimestamp: eigenPod.mostRecentWithdrawalTimestamp(), endTimestamp: endTimestamp});
+
+        uint256 feeRecipientBalanceBefore = feeRecipient.balance;
+        cheats.deal(address(eigenPod), fee);
+        cheats.deal(address(eigenPod), provenAmount);
+        cheats.startPrank(address(eigenPodManagerMock));
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, fee, feeRecipient);
+        cheats.stopPrank();
+
+        assertEq(feeRecipient.balance - feeRecipientBalanceBefore == fee, true, "Fee recipient should have received fee");
+        assertEq(uint64(address(delayedWithdrawalRouterMock).balance), provenAmount - fee, "Incorrect amount set to delayed withdrawal router");
+    }
+
+    function testFuzz_proofCallbackRequest_MerkleProvenPartialWithdrawalsIsNonZero(uint64 endTimestamp, uint64 sumOfPartialWithdrawalsClaimedGwei, uint64 provenAmount, uint64 fee) external {
+        cheats.assume(provenAmount > fee);
+        cheats.assume(provenAmount > sumOfPartialWithdrawalsClaimedGwei);
+
+        cheats.assume(eigenPod.mostRecentWithdrawalTimestamp() < endTimestamp);
+        bytes32 slot = bytes32(uint256(56)); 
+        bytes32 value = bytes32(uint256(sumOfPartialWithdrawalsClaimedGwei)); 
+        cheats.store(address(eigenPod), slot, value);
+
+
+        IEigenPod.VerifiedPartialWithdrawalBatch memory vp = IEigenPod.VerifiedPartialWithdrawalBatch({provenPartialWithdrawalSumGwei: provenAmount, mostRecentWithdrawalTimestamp: eigenPod.mostRecentWithdrawalTimestamp(), endTimestamp: endTimestamp});
+
+        uint256 feeRecipientBalanceBefore = feeRecipient.balance;
+        cheats.deal(address(eigenPod), fee);
+        cheats.deal(address(eigenPod), provenAmount);
+        cheats.startPrank(address(eigenPodManagerMock));
+        eigenPod.fulfillPartialWithdrawalProofRequest(vp, fee, feeRecipient);
+        cheats.stopPrank();
+
+        if(provenAmount - sumOfPartialWithdrawalsClaimedGwei >= fee){
+            assertEq(feeRecipient.balance - feeRecipientBalanceBefore == fee, true, "Fee recipient should have received fee");
+            assertEq(uint64(address(delayedWithdrawalRouterMock).balance), provenAmount - sumOfPartialWithdrawalsClaimedGwei - fee, "Incorrect amount set to delayed withdrawal router");
+        } else {
+            assertEq(uint64(address(delayedWithdrawalRouterMock).balance), provenAmount - sumOfPartialWithdrawalsClaimedGwei, "Incorrect amount set to delayed withdrawal router");
+        }
+        assertEq(eigenPod.sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei(), 0, "sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei should be set to 0");
     }
 }

@@ -92,7 +92,7 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
     uint256 public nonBeaconChainETHBalanceWei;
 
      /// @notice This variable tracks the total amount of partial withdrawals claimed via merkle proofs prior to a switch to ZK proofs for claiming partial withdrawals
-    uint64 public sumOfPartialWithdrawalsClaimedGwei;
+    uint64 public sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei;
 
     modifier onlyEigenPodManager() {
         require(msg.sender == address(eigenPodManager), "EigenPod.onlyEigenPodManager: not eigenPodManager");
@@ -311,7 +311,6 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
                 (validatorFieldsProofs.length == validatorFields.length),
             "EigenPod.verifyWithdrawalCredentials: validatorIndices and proofs must be same length"
         );
-
         /**
          * Withdrawal credential proof should not be "stale" (older than VERIFY_BALANCE_UPDATE_WINDOW_SECONDS) as we are doing a balance check here
          * The validator container persists as the state evolves and even after the validator exits. So we can use a more "fresh" credential proof within
@@ -426,6 +425,49 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
         emit RestakedBeaconChainETHWithdrawn(recipient, amountWei);
         // transfer ETH from pod to `recipient` directly
         _sendETH(recipient, amountWei);
+    }
+
+
+    /*******************************************************************************
+                    EXTERNAL FUNCTIONS CALLABLE BY PERMISSIONED SERVICES
+    *******************************************************************************/
+
+    /// @notice Called by the EigenPodManager to fulfill a partial withdrawal proof request
+    function fulfillPartialWithdrawalProofRequest(
+        IEigenPod.VerifiedPartialWithdrawalBatch calldata verifiedPartialWithdrawalBatch,
+        uint64 feeGwei,
+        address feeRecipient
+    ) external onlyEigenPodManager {
+
+        require(verifiedPartialWithdrawalBatch.mostRecentWithdrawalTimestamp == mostRecentWithdrawalTimestamp, "EigenPod.fulfillPartialWithdrawalProofRequest: proven mostRecentWithdrawalTimestamp must match mostRecentWithdrawalTimestamp in the EigenPod");
+        require(mostRecentWithdrawalTimestamp < verifiedPartialWithdrawalBatch.endTimestamp, "EigenPod.fulfillPartialWithdrawalProofRequest: mostRecentWithdrawalTimestamp must precede endTimestamp");
+
+        require(verifiedPartialWithdrawalBatch.provenPartialWithdrawalSumGwei >= feeGwei, "EigenPod.fulfillPartialWithdrawalProofRequest: provenPartialWithdrawalSumGwei must be greater than the fee");
+        
+        //update mostRecentWithdrawalTimestamp to currently proven endTimestamp
+        mostRecentWithdrawalTimestamp = verifiedPartialWithdrawalBatch.endTimestamp;
+
+        uint64 provenPartialWithdrawalSumGwei = verifiedPartialWithdrawalBatch.provenPartialWithdrawalSumGwei;
+        // subtract an partial withdrawals that may have been claimed via merkle proofs
+        if(provenPartialWithdrawalSumGwei > sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei){
+            if(sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei > 0){
+                provenPartialWithdrawalSumGwei -= sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei;
+                sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei = 0;
+            }
+
+            //Once sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei, we need to ensure that there is enough ETH in the pod to pay the fee
+            if(provenPartialWithdrawalSumGwei >= feeGwei){
+                provenPartialWithdrawalSumGwei -= feeGwei;
+                //send proof service their fee
+                AddressUpgradeable.sendValue(payable(feeRecipient), feeGwei);
+            }
+            if(provenPartialWithdrawalSumGwei > 0){
+                _sendETH_AsDelayedWithdrawal(podOwner, provenPartialWithdrawalSumGwei);
+            }
+
+        } else {
+            sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei -= provenPartialWithdrawalSumGwei;
+        }
     }
 
     /*******************************************************************************
@@ -712,6 +754,10 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
         address recipient,
         uint64 partialWithdrawalAmountGwei
     ) internal returns (VerifiedWithdrawal memory) {
+        require(
+            !eigenPodManager.proofServiceEnabled(),
+            "EigenPod._processPartialWithdrawal: partial withdrawal merkle proofs are disabled"
+        );
         emit PartialWithdrawalRedeemed(
             validatorIndex,
             withdrawalTimestamp,
@@ -719,7 +765,7 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
             partialWithdrawalAmountGwei
         );
 
-        sumOfPartialWithdrawalsClaimedGwei += partialWithdrawalAmountGwei;
+        sumOfPartialWithdrawalsClaimedViaMerkleProvenGwei += partialWithdrawalAmountGwei;
 
         // For partial withdrawals, the withdrawal amount is immediately sent to the pod owner
         return
@@ -788,11 +834,13 @@ contract EigenPod is IEigenPod, Initializable, ReentrancyGuardUpgradeable, Eigen
         return _validatorPubkeyHashToInfo[pubkeyHash].status;
     }
 
+
         /// @notice Returns the validator status for a given validatorPubkey
     function validatorStatus(bytes calldata validatorPubkey) external view returns (VALIDATOR_STATUS) {
         bytes32 validatorPubkeyHash = _calculateValidatorPubkeyHash(validatorPubkey);
         return _validatorPubkeyHashToInfo[validatorPubkeyHash].status;
     }
+
 
 
     /**

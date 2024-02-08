@@ -11,6 +11,8 @@ import "src/test/utils/EigenLayerUnitTestSetup.sol";
 import "src/test/harnesses/EigenPodManagerWrapper.sol";
 import "src/test/mocks/EigenPodMock.sol";
 import "src/test/mocks/ETHDepositMock.sol";
+import "src/test/mocks/BeaconChainOracleMock.sol";
+import "src/test/mocks/RiscZeroVerifierMock.sol";
 
 contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
     // Contracts Under Test: EigenPodManager
@@ -23,6 +25,7 @@ contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
     IETHPOSDeposit public ethPOSMock;
     IEigenPod public eigenPodMockImplementation;
     IBeacon public eigenPodBeacon; // Proxy for eigenPodMockImplementation
+    BeaconChainOracleMock public beaconChainOracle;
     
     // Constants
     uint256 public constant GWEI_TO_WEI = 1e9;
@@ -36,6 +39,7 @@ contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
         // Deploy Mocks
         ethPOSMock = new ETHPOSDepositMock();
         eigenPodMockImplementation = new EigenPodMock();
+        beaconChainOracle = new BeaconChainOracleMock();
         eigenPodBeacon = new UpgradeableBeacon(address(eigenPodMockImplementation));
 
         // Deploy EPM Implementation & Proxy
@@ -54,7 +58,7 @@ contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
                     abi.encodeWithSelector(
                         EigenPodManager.initialize.selector,
                         type(uint256).max /*maxPods*/,
-                        IBeaconChainOracle(address(0)) /*beaconChainOracle*/,
+                        beaconChainOracle /*beaconChainOracle*/,
                         initialOwner,
                         pauserRegistry,
                         0 /*initialPausedStatus*/
@@ -65,6 +69,8 @@ contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
 
         // Set defaultPod
         defaultPod = eigenPodManager.getPod(defaultStaker);
+        emit log_named_address("defaultPod", address(defaultPod));
+        emit log_named_address("defaultStaker", defaultStaker);
 
         // Exclude the zero address, and the eigenPodManager itself from fuzzed inputs
         addressIsExcludedFromFuzzedInputs[address(0)] = true;
@@ -101,6 +107,13 @@ contract EigenPodManagerUnitTests is EigenLayerUnitTestSetup {
         assertEq(address(eigenPodManager.ownerToPod(staker)), expectedPod, "Expected pod not deployed");
         assertEq(eigenPodManager.numPods(), numPodsBefore + 1, "Num pods not incremented");
     }
+
+    function _turnOnPartialWithdrawalSwitch(EigenPodManager epm) internal {
+        // Turn on partial withdrawal switch
+        cheats.prank(epm.owner());
+        epm.enableProofService();
+        cheats.stopPrank();
+    }
 }
 
 contract EigenPodManagerUnitTests_Initialization_Setters is EigenPodManagerUnitTests, IEigenPodManagerEvents {
@@ -112,7 +125,6 @@ contract EigenPodManagerUnitTests_Initialization_Setters is EigenPodManagerUnitT
     function test_initialization() public {
         // Check max pods, beacon chain, owner, and pauser
         assertEq(eigenPodManager.maxPods(), type(uint256).max, "Initialization: max pods incorrect");
-        assertEq(address(eigenPodManager.beaconChainOracle()), address(IBeaconChainOracle(address(0))), "Initialization: beacon chain oracle incorrect");
         assertEq(eigenPodManager.owner(), initialOwner, "Initialization: owner incorrect");
         assertEq(address(eigenPodManager.pauserRegistry()), address(pauserRegistry), "Initialization: pauser registry incorrect");
         assertEq(eigenPodManager.paused(), 0, "Initialization: paused value not 0");
@@ -550,3 +562,104 @@ contract EigenPodManagerUnitTests_ShareAdjustmentCalculationTests is EigenPodMan
         assertEq(sharesDelta, sharesAfter - sharesBefore, "Shares delta must be equal to the difference between sharesAfter and sharesBefore");
     }
 }
+
+contract EigenPodManagerUnitTests_OffchainProofGenerationTests is EigenPodManagerUnitTests {
+    address defaultProver = address(123);
+    bytes32 blockRoot = bytes32(uint256(123));
+
+    uint64[] public feesArray;
+    
+
+
+    function setUp() virtual override public {
+        super.setUp();
+        RiscZeroVerifierMock defaultVerifier = new RiscZeroVerifierMock();
+        cheats.startPrank(eigenPodManager.owner());
+        eigenPodManager.updateProofService(IEigenPodManager.ProofService({caller: defaultProver, feeRecipient: defaultProver, verifier: address(defaultVerifier)}));
+        cheats.stopPrank();
+
+        cheats.startPrank(defaultStaker);
+        eigenPodManager.stake(new bytes(0), new bytes(0), bytes32(0));
+        cheats.stopPrank();
+
+        feesArray.push(0);
+
+        beaconChainOracle.setOracleBlockRootAtTimestamp(blockRoot);
+    }
+    function testFuzz_proofCallback_revert_incorrectOracleTimestamp(uint64 oracleTimestamp, uint64 startTimestamp, uint64 endTimestamp) public {
+        cheats.assume(oracleTimestamp < endTimestamp);
+        _turnOnPartialWithdrawalSwitch(eigenPodManager);
+
+        IEigenPodManager.Journal memory journal = _assembleJournal(defaultPod, defaultStaker, 0, endTimestamp, 0, blockRoot);
+        IEigenPodManager.WithdrawalCallbackInfo memory withdrawalCallbackInfo = IEigenPodManager.WithdrawalCallbackInfo(oracleTimestamp, feesArray, new bytes(0), bytes32(0), journal, bytes32(0));
+
+        cheats.startPrank(defaultProver);
+        cheats.expectRevert(bytes("EigenPodManager.proofServiceCallback: oracle timestamp must be greater than or equal to callback timestamp"));
+        eigenPodManager.proofServiceCallback(withdrawalCallbackInfo);
+        cheats.stopPrank();
+    }
+
+    function testFuzz_proofCallback_revert_feeExceedsMaxFee(uint64 oracleTimestamp, uint64 endTimestamp, uint64 maxFee, uint64 fee) public {
+        cheats.assume(oracleTimestamp > endTimestamp);
+        cheats.assume(fee > maxFee);
+        feesArray[0] = fee;
+
+        _turnOnPartialWithdrawalSwitch(eigenPodManager);
+        cheats.startPrank(defaultProver);
+        cheats.expectRevert(bytes("EigenPodManager.proofServiceCallback: fee must be less than or equal to maxFee"));
+        eigenPodManager.proofServiceCallback(IEigenPodManager.WithdrawalCallbackInfo(oracleTimestamp, feesArray, new bytes(0), bytes32(0), _assembleJournal(defaultPod, defaultStaker, 0, endTimestamp, maxFee, blockRoot), bytes32(0)));
+        cheats.stopPrank();
+    }
+
+    function testFuzz_proofCallback_revert_incorrectBlockRoot(bytes32 incorrectBlockRoot) public {
+        cheats.assume(incorrectBlockRoot != blockRoot);
+
+        _turnOnPartialWithdrawalSwitch(eigenPodManager);
+        emit log_address(address(defaultPod));
+        IEigenPodManager.Journal memory journal = _assembleJournal(defaultPod, defaultStaker, 0, 0, 0, incorrectBlockRoot);
+
+        IEigenPodManager.WithdrawalCallbackInfo memory withdrawalCallbackInfo = IEigenPodManager.WithdrawalCallbackInfo(0, feesArray, new bytes(0), bytes32(0), journal, bytes32(0));
+
+        cheats.startPrank(defaultProver);
+        cheats.expectRevert(bytes("EigenPodManager.proofServiceCallback: block root does not match oracleRoot for that timestamp"));
+        eigenPodManager.proofServiceCallback(withdrawalCallbackInfo);
+        cheats.stopPrank();
+    }
+
+    function _assembleJournal(
+        IEigenPod eigenPod, 
+        address podOwner, 
+        uint64 mostRecentWithdrawalTimestamp,
+        uint64 endTimestamp, 
+        uint64 maxFee,
+        bytes32 blockRoot
+    ) internal returns (IEigenPodManager.Journal memory) {
+        address[] memory eigenPodAddressArray = new address[](1);
+        eigenPodAddressArray[0] = address(eigenPod);
+        address[] memory podOwnerArray = new address[](1); // Replace YourType with the actual type of podOwner
+        podOwnerArray[0] = podOwner;
+        uint64[] memory withdrawalTimestampArray = new uint64[](1);
+        withdrawalTimestampArray[0] = mostRecentWithdrawalTimestamp;
+        uint64[] memory endTimestampArray = new uint64[](1);
+        endTimestampArray[0] = endTimestamp;
+        uint64[] memory feeArray = new uint64[](1);
+        feeArray[0] = maxFee;
+       return IEigenPodManager.Journal({
+                    provenPartialWithdrawalSumsGwei: new uint64[](1), 
+                    blockRoot: blockRoot, 
+                    podAddresses: eigenPodAddressArray, 
+                    podOwners: podOwnerArray, 
+                    mostRecentWithdrawalTimestamps: withdrawalTimestampArray, 
+                    endTimestamps: endTimestampArray, 
+                    maxFeesGwei: feeArray, 
+                    nonce: uint64(0)
+            });
+    }
+}
+
+
+
+
+
+
+
