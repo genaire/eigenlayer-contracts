@@ -16,6 +16,7 @@ contract EigenPodTests is ProofParsing, EigenPodPausingConstants {
 
     uint256 internal constant GWEI_TO_WEI = 1e9;
     uint64 public constant DENEB_FORK_TIMESTAMP_GOERLI = 1705473120;
+    uint64 public constant DENEB_FORK_TIMESTAMP_MAINNET = 1710338135;
 
 
     bytes pubkey =
@@ -188,7 +189,8 @@ contract EigenPodTests is ProofParsing, EigenPodPausingConstants {
             eigenPodBeacon,
             strategyManager,
             slasher,
-            delegation
+            delegation,
+            DENEB_FORK_TIMESTAMP_GOERLI
         );
 
         //ensuring that the address of eigenpodmanager doesn't change
@@ -507,7 +509,6 @@ contract EigenPodTests is ProofParsing, EigenPodPausingConstants {
 
     /// @notice This test is to ensure the full withdrawal flow works
     function testFullWithdrawalFlowDeneb() public returns (IEigenPod) {
-        eigenPodManager.setDenebForkTimestamp(DENEB_FORK_TIMESTAMP_GOERLI);
         IS_DENEB = true;
         //this call is to ensure that validator 302913 has proven their withdrawalcreds
         // ./solidityProofGen  -newBalance=32000115173 "ValidatorFieldsProof" 302913 true "data/withdrawal_proof_goerli/goerli_block_header_6399998.json"  "data/withdrawal_proof_goerli/goerli_slot_6399998.json" "withdrawal_credential_proof_302913.json"
@@ -519,6 +520,37 @@ contract EigenPodTests is ProofParsing, EigenPodPausingConstants {
         // To get block header: curl -H "Accept: application/json" 'https://eigenlayer.spiceai.io/goerli/beacon/eth/v1/beacon/headers/6399000?api_key\="343035|f6ebfef661524745abb4f1fd908a76e8"' > block_header_6399000.json
         // To get block:  curl -H "Accept: application/json" 'https://eigenlayer.spiceai.io/goerli/beacon/eth/v2/beacon/blocks/6399000?api_key\="343035|f6ebfef661524745abb4f1fd908a76e8"' > block_6399000.json
         setJSON("./src/test/test-data/fullWithdrawalDeneb.json");
+        return _proveWithdrawalForPod(newPod);
+    }
+
+    /// @notice This test is to ensure the full withdrawal flow works
+    function testFullWithdrawalFlowDenebMainnet() public returns (IEigenPod) {
+        EigenPodManager eigenPodManagerImplementationMainnet = new EigenPodManager(
+            ethPOSDeposit,
+            eigenPodBeacon,
+            strategyManager,
+            slasher,
+            delegation,
+            DENEB_FORK_TIMESTAMP_MAINNET
+        );
+
+        eigenLayerProxyAdmin.upgrade(
+            TransparentUpgradeableProxy(payable(address(eigenPodManager))),
+            address(eigenPodManagerImplementationMainnet)
+        );
+
+
+        IS_DENEB = true;
+        //this call is to ensure that validator 302913 has proven their withdrawalcreds
+        // ./solidityProofGen  -newBalance=32000115173 "ValidatorFieldsProof" 302913 true "data/withdrawal_proof_goerli/goerli_block_header_6399998.json"  "data/withdrawal_proof_goerli/goerli_slot_6399998.json" "withdrawal_credential_proof_302913.json"
+        setJSON("./src/test/test-data/withdrawal_credential_proof_302913.json");
+        _testDeployAndVerifyNewEigenPod(podOwner, signature, depositDataRoot);
+        IEigenPod newPod = eigenPodManager.getPod(podOwner);
+
+        //Deneb: ./solidityProofGen/solidityProofGen "WithdrawalFieldsProof" 302913 271 8191 true false "data/deneb_goerli_block_header_7431952.json" "data/deneb_goerli_slot_7431952.json" "data/deneb_goerli_slot_7421952.json" "data/deneb_goerli_block_header_7421951.json" "data/deneb_goerli_block_7421951.json" "fullWithdrawalProof_Latest.json" false false
+        // To get block header: curl -H "Accept: application/json" 'https://eigenlayer.spiceai.io/goerli/beacon/eth/v1/beacon/headers/6399000?api_key\="343035|f6ebfef661524745abb4f1fd908a76e8"' > block_header_6399000.json
+        // To get block:  curl -H "Accept: application/json" 'https://eigenlayer.spiceai.io/goerli/beacon/eth/v2/beacon/blocks/6399000?api_key\="343035|f6ebfef661524745abb4f1fd908a76e8"' > block_6399000.json
+        setJSON("./src/test/test-data/fullWithdrawalDenebMainnet.json");
         return _proveWithdrawalForPod(newPod);
     }
 
