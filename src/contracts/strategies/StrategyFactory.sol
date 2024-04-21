@@ -65,6 +65,11 @@ contract StrategyFactory is OwnableUpgradeable, Pausable {
             )
         );
         _setStrategyForToken(token, strategy);
+        IStrategy[] memory strategiesToWhitelist = new IStrategy[](1);
+        bool[] memory thirdPartyTransfersForbiddenValues = new bool[](1);
+        strategiesToWhitelist[0] = strategy;
+        thirdPartyTransfersForbiddenValues[0] = false;
+        strategyManager.addStrategiesToDepositWhitelist(strategiesToWhitelist, thirdPartyTransfersForbiddenValues);
     }
 
     /** 
