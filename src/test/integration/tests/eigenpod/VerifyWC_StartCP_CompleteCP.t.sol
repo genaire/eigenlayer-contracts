@@ -216,7 +216,7 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         beaconChain.advanceEpoch_NoRewards();
 
         staker.startCheckpoint();
-        check_StartCheckpoint_State(staker);
+        check_StartCheckpoint_WithPodBalance_State(staker, exitedBalanceGwei);
 
         staker.completeCheckpoint();
         check_CompleteCheckpoint_WithExits_State(staker, subset, exitedBalanceGwei);
@@ -269,8 +269,6 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         (User staker, ,) = _newRandomStaker();
 
         (uint40[] memory validators, uint64 beaconBalanceGwei) = staker.startValidators();
-        beaconChain.advanceEpoch_NoRewards();
-
         // Advance epoch and generate consensus rewards, but don't withdraw to pod
         beaconChain.advanceEpoch_NoWithdraw();
         uint64 beaconBalanceIncreaseGwei = uint64(validators.length) * beaconChain.CONSENSUS_REWARD_AMOUNT_GWEI();
@@ -356,10 +354,10 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         check_VerifyWC_State(staker, validators, beaconBalanceGwei);
 
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, expectedWithdrawnGwei);
+        check_StartCheckpoint_WithPodBalance_State(staker, expectedWithdrawnGwei);
 
         staker.completeCheckpoint();
-        check_CompleteCheckpoint_State(staker);
+        check_CompleteCheckpoint_WithPodBalance_State(staker, expectedWithdrawnGwei);
     }
 
     /// 1. Verify validators' withdrawal credentials
@@ -381,10 +379,10 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         uint64 expectedWithdrawnGwei = uint64(validators.length) * beaconChain.CONSENSUS_REWARD_AMOUNT_GWEI();
 
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, expectedWithdrawnGwei);
+        check_StartCheckpoint_WithPodBalance_State(staker, expectedWithdrawnGwei);
 
         staker.completeCheckpoint();
-        check_CompleteCheckpoint_State(staker);
+        check_CompleteCheckpoint_WithPodBalance_State(staker, expectedWithdrawnGwei);
     }
 
     /// 1. Verify validators' withdrawal credentials
@@ -404,7 +402,7 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         beaconChain.advanceEpoch_NoRewards();
 
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, 0);
+        check_StartCheckpoint_WithPodBalance_State(staker, 0);
 
         // Advance epoch, generating consensus rewards and withdrawing anything over 32 ETH
         beaconChain.advanceEpoch();
@@ -442,7 +440,7 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
 
         // should behave identically to partial withdrawals captured by the "earn to pod" variants
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, gweiSent);
+        check_StartCheckpoint_WithPodBalance_State(staker, gweiSent);
 
         staker.completeCheckpoint();
         check_CompleteCheckpoint_State(staker);
@@ -471,7 +469,7 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
 
         // should behave identically to partial withdrawals captured by the "earn to pod" variants
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, gweiSent);
+        check_StartCheckpoint_WithPodBalance_State(staker, gweiSent);
 
         staker.completeCheckpoint();
         check_CompleteCheckpoint_State(staker);
@@ -498,7 +496,7 @@ contract Integration_VerifyWC_StartCP_CompleteCP is IntegrationCheckUtils {
         // should behave identically to partial withdrawals captured by the "earn to pod" variants
         // ... if we didn't have any partial withdrawals!
         staker.startCheckpoint();
-        check_StartCheckpoint_EarnToPod_State(staker, 0);
+        check_StartCheckpoint_WithPodBalance_State(staker, 0);
 
         // Send a random amount of ETH to staker's fallback
         (uint64 gweiSent, uint remainderSent) = _sendRandomETH(address(staker.pod()));
