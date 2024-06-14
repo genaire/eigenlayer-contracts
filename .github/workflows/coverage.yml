@@ -48,7 +48,7 @@ jobs:
       run: mkdir report && cd report && genhtml ../lcov.info.pruned -o report --ignore-errors inconsistent
 
     - name: Archive code coverage results
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: report/*
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-coverage-report
+        path: report/*
