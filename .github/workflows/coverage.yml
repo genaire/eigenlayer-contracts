@@ -45,7 +45,7 @@ jobs:
       run: lcov --remove ./lcov.info -o ./lcov.info.pruned 'src/test/*' 'script/*' --ignore-errors inconsistent
 
     - name: Generate reports
-      run: mkdir report && cd report && genhtml ../lcov.info.pruned -o report --ignore-errors inconsistent
+      run: mkdir report && cd report && genhtml --version && genhtml ../lcov.info.pruned -o report --ignore-errors
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
