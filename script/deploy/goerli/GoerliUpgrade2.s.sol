@@ -89,9 +89,7 @@ contract GoerliUpgrade2 is Script, Test {
         address eigenPodImplementation = address(
             new EigenPod(
                 IETHPOSDeposit(0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b),
-                delayedWithdrawalRouter,
                 eigenPodManager,
-                32e9,
                 1616508000
             )
         );

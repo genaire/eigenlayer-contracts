@@ -513,7 +513,11 @@ contract ExistingDeploymentParser is Script, Test {
         strategyManager.initialize(address(0), address(0), eigenLayerPauserReg, STRATEGY_MANAGER_INIT_PAUSED_STATUS);
         // EigenPodManager
         vm.expectRevert(bytes("Initializable: contract is already initialized"));
-        eigenPodManager.initialize(beaconOracle, address(0), eigenLayerPauserReg, EIGENPOD_MANAGER_INIT_PAUSED_STATUS);
+        eigenPodManager.initialize(
+            address(0),
+            eigenLayerPauserReg,
+            EIGENPOD_MANAGER_INIT_PAUSED_STATUS
+        );
         // DelayedWithdrawalRouter
         vm.expectRevert(bytes("Initializable: contract is already initialized"));
         delayedWithdrawalRouter.initialize(
@@ -638,14 +642,6 @@ contract ExistingDeploymentParser is Script, Test {
             "eigenPodManager: init paused status set incorrectly"
         );
         require(
-            eigenPodManager.denebForkTimestamp() == EIGENPOD_MANAGER_DENEB_FORK_TIMESTAMP,
-            "eigenPodManager: denebForkTimestamp not set correctly"
-        );
-        require(
-            eigenPodManager.beaconChainOracle() == beaconOracle,
-            "eigenPodManager: beaconChainOracle not set correctly"
-        );
-        require(
             eigenPodManager.ethPOS() == IETHPOSDeposit(ETHPOSDepositAddress),
             "eigenPodManager: ethPOS not set correctly"
         );
@@ -655,12 +651,6 @@ contract ExistingDeploymentParser is Script, Test {
         require(
             eigenPodImplementation.GENESIS_TIME() == EIGENPOD_GENESIS_TIME,
             "eigenPodImplementation: GENESIS TIME not set correctly"
-        );
-        require(
-            eigenPodImplementation.MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR() ==
-                EIGENPOD_MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR &&
-                EIGENPOD_MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR % 1 gwei == 0,
-            "eigenPodImplementation: MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR not set correctly"
         );
         require(
             eigenPodImplementation.ethPOS() == IETHPOSDeposit(ETHPOSDepositAddress),

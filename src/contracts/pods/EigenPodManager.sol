@@ -55,12 +55,10 @@ contract EigenPodManager is
     }
 
     function initialize(
-        IBeaconChainOracle _beaconChainOracle,
         address initialOwner,
         IPauserRegistry _pauserRegistry,
         uint256 _initPausedStatus
     ) external initializer {
-        _updateBeaconChainOracle(_beaconChainOracle);
         _transferOwnership(initialOwner);
         _initializePauser(_pauserRegistry, _initPausedStatus);
     }
@@ -221,27 +219,6 @@ contract EigenPodManager is
         ownerToPod[podOwner].withdrawRestakedBeaconChainETH(destination, shares);
     }
 
-    /**
-     * @notice Updates the oracle contract that provides the beacon chain state root
-     * @param newBeaconChainOracle is the new oracle contract being pointed to
-     * @dev Callable only by the owner of this contract (i.e. governance)
-     */
-    function updateBeaconChainOracle(IBeaconChainOracle newBeaconChainOracle) external onlyOwner {
-        _updateBeaconChainOracle(newBeaconChainOracle);
-    }
-
-    /**
-     * @notice Sets the timestamp of the Deneb fork.
-     * @param newDenebForkTimestamp is the new timestamp of the Deneb fork
-     */
-    function setDenebForkTimestamp(uint64 newDenebForkTimestamp) external onlyOwner {
-        require(newDenebForkTimestamp != 0, "EigenPodManager.setDenebForkTimestamp: cannot set newDenebForkTimestamp to 0");
-        require(_denebForkTimestamp == 0, "EigenPodManager.setDenebForkTimestamp: cannot set denebForkTimestamp more than once");
-        
-        _denebForkTimestamp = newDenebForkTimestamp;
-        emit DenebForkTimestampUpdated(newDenebForkTimestamp);
-    }
-
     // INTERNAL FUNCTIONS
 
     function _deployPod() internal returns (IEigenPod) {
@@ -260,12 +237,6 @@ contract EigenPodManager is
         ownerToPod[msg.sender] = pod;
         emit PodDeployed(address(pod), msg.sender);
         return pod;
-    }
-
-    /// @notice Internal setter for `beaconChainOracle` that also emits an event
-    function _updateBeaconChainOracle(IBeaconChainOracle newBeaconChainOracle) internal {
-        beaconChainOracle = newBeaconChainOracle;
-        emit BeaconOracleUpdated(address(newBeaconChainOracle));
     }
 
     /**
@@ -312,28 +283,5 @@ contract EigenPodManager is
     /// @notice Returns 'true' if the `podOwner` has created an EigenPod, and 'false' otherwise.
     function hasPod(address podOwner) public view returns (bool) {
         return address(ownerToPod[podOwner]) != address(0);
-    }
-
-    /// @notice Returns the Beacon block root at `timestamp`. Reverts if the Beacon block root at `timestamp` has not yet been finalized.
-    function getBlockRootAtTimestamp(uint64 timestamp) external view returns (bytes32) {
-        bytes32 stateRoot = beaconChainOracle.timestampToBlockRoot(timestamp);
-        require(
-            stateRoot != bytes32(0),
-            "EigenPodManager.getBlockRootAtTimestamp: state root at timestamp not yet finalized"
-        );
-        return stateRoot;
-    }
-
-    /**
-     * @notice Wrapper around the `_denebForkTimestamp` storage variable that returns type(uint64).max if the storage variable is unset.
-     * @dev This allows restricting the storage variable to be set once and only once.
-     */
-    function denebForkTimestamp() public view returns (uint64) {
-        uint64 timestamp = _denebForkTimestamp;
-        if (timestamp == 0) {
-            return type(uint64).max;
-        } else {
-            return timestamp;
-        }
     }
 }

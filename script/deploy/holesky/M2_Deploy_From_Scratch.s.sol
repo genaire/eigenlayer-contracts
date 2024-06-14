@@ -74,9 +74,7 @@ contract M2_Deploy_Holesky_From_Scratch is ExistingDeploymentParser {
         // Deploy EigenPod Contracts
         eigenPodImplementation = new EigenPod(
             IETHPOSDeposit(ETHPOSDepositAddress),
-            delayedWithdrawalRouter,
             eigenPodManager,
-            EIGENPOD_MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR,
             EIGENPOD_GENESIS_TIME
         );
 
@@ -151,7 +149,6 @@ contract M2_Deploy_Holesky_From_Scratch is ExistingDeploymentParser {
             address(eigenPodManagerImplementation),
             abi.encodeWithSelector(
                 EigenPodManager.initialize.selector,
-                beaconOracle,
                 msg.sender, // initialOwner is msg.sender for now to set forktimestamp later
                 eigenLayerPauserReg,
                 EIGENPOD_MANAGER_INIT_PAUSED_STATUS
@@ -205,9 +202,6 @@ contract M2_Deploy_Holesky_From_Scratch is ExistingDeploymentParser {
         // Add strategies to whitelist and set whitelister to STRATEGY_MANAGER_WHITELISTER
         strategyManager.addStrategiesToDepositWhitelist(strategiesToWhitelist, thirdPartyTransfersForbiddenValues);
         strategyManager.setStrategyWhitelister(STRATEGY_MANAGER_WHITELISTER);
-
-        // Fork timestamp config
-        eigenPodManager.setDenebForkTimestamp(EIGENPOD_MANAGER_DENEB_FORK_TIMESTAMP);
 
         // Transfer ownership
         strategyManager.transferOwnership(executorMultisig);

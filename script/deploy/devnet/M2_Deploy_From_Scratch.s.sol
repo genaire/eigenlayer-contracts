@@ -185,9 +185,7 @@ contract Deployer_M2 is Script, Test {
         }
         eigenPodImplementation = new EigenPod(
             ethPOSDeposit,
-            delayedWithdrawalRouter,
             eigenPodManager,
-            MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR,
             GOERLI_GENESIS_TIME
         );
 
@@ -561,19 +559,10 @@ contract Deployer_M2 is Script, Test {
         // require(delayedWithdrawalRouter.withdrawalDelayBlocks() == 7 days / 12 seconds,
         //     "delayedWithdrawalRouter: withdrawalDelayBlocks initialized incorrectly");
         // uint256 MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR = 32 ether;
-        require(
-            eigenPodImplementation.MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR() == 32 gwei,
-            "eigenPod: MAX_RESTAKED_BALANCE_GWEI_PER_VALIDATOR initialized incorrectly"
-        );
 
         require(
             strategyManager.strategyWhitelister() == operationsMultisig,
             "strategyManager: strategyWhitelister address not set correctly"
-        );
-
-        require(
-            eigenPodManager.beaconChainOracle() == IBeaconChainOracle(address(0)),
-            "eigenPodManager: eigenPodBeacon contract address not set correctly"
         );
 
         require(
@@ -593,10 +582,6 @@ contract Deployer_M2 is Script, Test {
         require(
             eigenPodImplementation.eigenPodManager() == eigenPodManager,
             " eigenPodImplementation: eigenPodManager contract address not set correctly"
-        );
-        require(
-            eigenPodImplementation.delayedWithdrawalRouter() == delayedWithdrawalRouter,
-            " eigenPodImplementation: delayedWithdrawalRouter contract address not set correctly"
         );
 
         string memory config_data = vm.readFile(deployConfigPath);
