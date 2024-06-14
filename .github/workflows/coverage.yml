@@ -1,8 +1,8 @@
-name: Run Parallel
+name: Run Coverage
 
 on:
-  workflow_dispatch: {}
   push:
+  workflow_dispatch: {}
 
 jobs:
   prepare:
